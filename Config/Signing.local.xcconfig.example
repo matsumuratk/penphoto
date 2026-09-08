@@ -1,0 +1,4 @@
+// Copy to Signing.local.xcconfig and set your Apple Development Team ID.
+DEVELOPMENT_TEAM = YOUR_TEAM_ID
+// Change only if this bundle ID is unavailable for your team.
+PENPHOTO_BUNDLE_IDENTIFIER = jp.penphoto.app

@@ -1,0 +1,11 @@
+.DS_Store
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcresult
+
+build-device/
+
+Config/Signing.local.xcconfig
+build-physical/

@@ -1,0 +1,4 @@
+// Shared defaults. Local developer settings are kept outside source control.
+CODE_SIGN_STYLE = Automatic
+PENPHOTO_BUNDLE_IDENTIFIER = jp.penphoto.app
+#include? "Signing.local.xcconfig"
