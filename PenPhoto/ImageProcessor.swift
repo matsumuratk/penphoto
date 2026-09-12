@@ -16,68 +16,140 @@ final class ImageProcessor: @unchecked Sendable {
         return UIGraphicsImageRenderer(size: size, format: format).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
     }
 
-    func beauty(_ input: CIImage, strength: Double) -> CIImage {
-        guard strength > 0.001 else { return input }
+    /// Landmark coordinates are normalized in Vision's bottom-left coordinate space.
+    struct FaceRegion {
+        var bounds: CGRect
+        var protectedFeatures: [CGRect] = []
+    }
+
+    func detectFaces(_ image: CIImage) -> [FaceRegion] {
+        let scale = min(1, 768 / max(image.extent.width, image.extent.height))
+        let detectionImage = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         let request = VNDetectFaceLandmarksRequest()
-        guard (try? VNImageRequestHandler(ciImage: input, options: [:]).perform([request])) != nil,
-              let faces = request.results, !faces.isEmpty else { return input }
+        #if targetEnvironment(simulator)
+        request.usesCPUOnly = true
+        #endif
+        do { try VNImageRequestHandler(ciImage: detectionImage, options: [:]).perform([request]) }
+        catch { NSLog("PenPhoto face detection unavailable: %@", error.localizedDescription); return [] }
+        return (request.results ?? []).map { face in
+            let features = [face.landmarks?.leftEye, face.landmarks?.rightEye,
+                            face.landmarks?.leftEyebrow, face.landmarks?.rightEyebrow,
+                            face.landmarks?.outerLips, face.landmarks?.nose]
+            let boxes = features.compactMap { feature -> CGRect? in
+                guard let points = feature?.normalizedPoints,
+                      let x0 = points.map(\.x).min(), let x1 = points.map(\.x).max(),
+                      let y0 = points.map(\.y).min(), let y1 = points.map(\.y).max() else { return nil }
+                return CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
+            }
+            return FaceRegion(bounds: face.boundingBox, protectedFeatures: boxes)
+        }
+    }
+
+    func beauty(_ input: CIImage, strength: Double, style: BeautyStyle = .natural, faces suppliedFaces: [FaceRegion]? = nil) -> CIImage {
+        let amount = min(1, max(0, strength))
+        guard amount > 0.001 else { return input }
+        let faces = suppliedFaces ?? detectFaces(input)
+        guard !faces.isEmpty else { return input }
         let extent = input.extent
-        let maskFormat = UIGraphicsImageRendererFormat(); maskFormat.scale = 1
-        // A small, feathered mask avoids allocating another full-resolution bitmap.
-        let maskSize = CGSize(width: 512, height: 512 * extent.height / extent.width)
-        let maskImage = UIGraphicsImageRenderer(size: maskSize, format: maskFormat).image { renderer in
+        let scale = 512 / max(extent.width, extent.height)
+        let maskSize = CGSize(width: max(1, extent.width * scale), height: max(1, extent.height * scale))
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        let maskImage = UIGraphicsImageRenderer(size: maskSize, format: format).image { renderer in
             let cg = renderer.cgContext
-            cg.setFillColor(UIColor.black.cgColor); cg.fill(CGRect(origin: .zero, size: maskSize))
+            UIColor.black.setFill(); cg.fill(CGRect(origin: .zero, size: maskSize))
             for face in faces {
-                let box = face.boundingBox
+                let box = face.bounds
                 let rect = CGRect(x: box.minX * maskSize.width, y: (1 - box.maxY) * maskSize.height,
                                   width: box.width * maskSize.width, height: box.height * maskSize.height)
-                cg.setFillColor(UIColor.white.cgColor)
-                cg.fillEllipse(in: rect.insetBy(dx: rect.width * 0.08, dy: rect.height * 0.06))
-                // Preserve eyes, eyebrows, and lips; this remains an initial approximation of skin.
-                let features = [face.landmarks?.leftEye, face.landmarks?.rightEye,
-                                face.landmarks?.leftEyebrow, face.landmarks?.rightEyebrow, face.landmarks?.outerLips]
-                cg.setFillColor(UIColor.black.cgColor)
-                for feature in features.compactMap({ $0 }) {
-                    let points = feature.normalizedPoints
-                    guard let minX = points.map(\.x).min(), let maxX = points.map(\.x).max(),
-                          let minY = points.map(\.y).min(), let maxY = points.map(\.y).max() else { continue }
-                    let featureRect = CGRect(x: rect.minX + minX * rect.width, y: rect.minY + (1 - maxY) * rect.height,
-                                             width: (maxX - minX) * rect.width, height: (maxY - minY) * rect.height)
-                    cg.fillEllipse(in: featureRect.insetBy(dx: -rect.width * 0.035, dy: -rect.height * 0.025))
+                UIColor.white.setFill()
+                // Stay inside the face boundary to reduce hair/background spill.
+                cg.fillEllipse(in: rect.insetBy(dx: rect.width * 0.12, dy: rect.height * 0.09))
+            }
+            // Protect all faces' features after the union, including overlapping faces.
+            UIColor.black.setFill()
+            for face in faces {
+                let box = face.bounds
+                let rect = CGRect(x: box.minX * maskSize.width, y: (1 - box.maxY) * maskSize.height,
+                                  width: box.width * maskSize.width, height: box.height * maskSize.height)
+                for feature in face.protectedFeatures {
+                    let region = CGRect(x: rect.minX + feature.minX * rect.width,
+                                        y: rect.minY + (1 - feature.maxY) * rect.height,
+                                        width: feature.width * rect.width, height: feature.height * rect.height)
+                    cg.fillEllipse(in: region.insetBy(dx: -rect.width * 0.045, dy: -rect.height * 0.035))
                 }
             }
         }
-        guard let mask = CIImage(image: maskImage) else { return input }
-        let scaledMask = mask.transformed(by: CGAffineTransform(scaleX: extent.width / maskSize.width, y: extent.height / maskSize.height))
+        guard let rawMask = CIImage(image: maskImage) else { return input }
+        let faceWidth = faces.map { $0.bounds.width * extent.width }.max() ?? extent.width * 0.3
+        let mask = rawMask.transformed(by: CGAffineTransform(scaleX: extent.width / maskSize.width, y: extent.height / maskSize.height))
             .transformed(by: CGAffineTransform(translationX: extent.minX, y: extent.minY))
-            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: extent.width * 0.003])
-        let smooth = input.clampedToExtent().applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: extent.width * 0.0015 * strength])
-            .applyingFilter("CIColorControls", parameters: [kCIInputBrightnessKey: strength * 0.025]).cropped(to: extent)
-        let opacityMask = scaledMask.applyingFilter("CIColorMatrix", parameters: ["inputRVector": CIVector(x: strength * 0.65, y: 0, z: 0, w: 0), "inputGVector": CIVector(x: 0, y: strength * 0.65, z: 0, w: 0), "inputBVector": CIVector(x: 0, y: 0, z: strength * 0.65, w: 0)])
-        return smooth.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: input, kCIInputMaskImageKey: opacityMask]).cropped(to: extent)
+            .clampedToExtent().applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: max(0.5, faceWidth * 0.008)]).cropped(to: extent)
+        // Suppress processing around image edges as well as the protected landmarks.
+        let edges = input.applyingFilter("CIEdges", parameters: [kCIInputIntensityKey: 4])
+            .applyingFilter("CIColorInvert")
+            .applyingFilter("CIColorClamp", parameters: ["inputMinComponents": CIVector(x: 0, y: 0, z: 0, w: 1), "inputMaxComponents": CIVector(x: 1, y: 1, z: 1, w: 1)])
+        let detailMask = mask.applyingFilter("CIMultiplyCompositing", parameters: [kCIInputBackgroundImageKey: edges])
+            .applyingFilter("CIColorMatrix", parameters: ["inputRVector": CIVector(x: amount * style.smoothing, y: 0, z: 0, w: 0), "inputGVector": CIVector(x: 0, y: amount * style.smoothing, z: 0, w: 0), "inputBVector": CIVector(x: 0, y: 0, z: amount * style.smoothing, w: 0)])
+        let smooth = input.clampedToExtent()
+            .applyingFilter("CINoiseReduction", parameters: ["inputNoiseLevel": 0.02 + amount * 0.055, "inputSharpness": 0.35])
+            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: max(0.3, faceWidth * 0.006 * amount)])
+            .applyingFilter("CIColorControls", parameters: [kCIInputBrightnessKey: amount * style.lift]).cropped(to: extent)
+        return smooth.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: input, kCIInputMaskImageKey: detailMask]).cropped(to: extent)
     }
 
-    func frame(_ image: CIImage, strength: Double) -> UIImage? {
-        let processed = beauty(image, strength: strength)
-        guard let cg = context.createCGImage(processed, from: processed.extent) else { return nil }
-        return UIImage(cgImage: cg)
+    func beautyFrame(_ image: CIImage, strength: Double, style: BeautyStyle) -> (image: UIImage?, faceCount: Int) {
+        let faces = detectFaces(image)
+        let processed = beauty(image, strength: strength, style: style, faces: faces)
+        let rendered = context.createCGImage(processed, from: processed.extent).map { UIImage(cgImage: $0) }
+        return (rendered, faces.count)
     }
 
-    func base(_ original: UIImage, recipe: PhotoRecipe, maxDimension: CGFloat? = nil) -> UIImage {
+    /// Beauty, brightness, capture-aspect crop and rotation — everything the crop step itself sits on top of.
+    /// Shared by `base(_:recipe:)` and `CropEditorView`, so the photo the user positions the crop against
+    /// is pixel-for-pixel the same one `base` crops from; preview and export can never disagree.
+    func imageBeforeCrop(_ original: UIImage, recipe: PhotoRecipe, maxDimension: CGFloat? = nil) -> UIImage {
         let input = normalized(original, maxDimension: maxDimension)
         guard var ci = CIImage(image: input) else { return input }
-        ci = beauty(ci, strength: recipe.beauty)
+        ci = beauty(ci, strength: recipe.beauty, style: recipe.beautyStyle ?? .natural)
         ci = ci.applyingFilter("CIColorControls", parameters: [kCIInputBrightnessKey: recipe.brightness])
         if let aspect = recipe.captureAspect { ci = ci.cropped(to: aspect.cropRect(in: ci.extent)) }
         for _ in 0..<(recipe.quarterTurns % 4) { ci = ci.oriented(.right) }
-        if let crop = recipe.crop {
-            let extent = ci.extent
-            let width = min(extent.width, extent.height * crop.value)
-            let height = width / crop.value
-            ci = ci.cropped(to: CGRect(x: extent.midX - width / 2, y: extent.midY - height / 2, width: width, height: height))
-        }
         guard let cg = context.createCGImage(ci, from: ci.extent) else { return input }
+        return UIImage(cgImage: cg)
+    }
+
+    /// The centered crop rect used when a ratio is chosen but the user hasn't positioned it yet
+    /// (and for every pre-existing draft, which only ever stored the ratio). Matches the crop this
+    /// app always produced before positioning was introduced.
+    static func defaultCropRect(ratio: CropRatio, extentSize: CGSize) -> NormalizedRect {
+        guard let value = ratio.fixedValue, extentSize.width > 0, extentSize.height > 0 else { return NormalizedRect() }
+        let width = min(extentSize.width, extentSize.height * value)
+        let height = width / value
+        return NormalizedRect(x: (extentSize.width - width) / 2 / extentSize.width,
+                              y: (extentSize.height - height) / 2 / extentSize.height,
+                              width: width / extentSize.width, height: height / extentSize.height)
+    }
+
+    /// Resolves a recipe's crop selection to a pixel rect within `extent`, flipping into Core Image's
+    /// bottom-left origin. Used for both the exported image and (via `defaultCropRect`) the editor's
+    /// initial/reset position, so the two stay in lockstep.
+    static func resolvedCropRect(ratio: CropRatio, normalized rectOrNil: NormalizedRect?, extent: CGRect) -> CGRect {
+        let rect = (rectOrNil ?? defaultCropRect(ratio: ratio, extentSize: extent.size)).clamped()
+        let width = max(1, rect.width * extent.width)
+        let height = max(1, rect.height * extent.height)
+        let left = extent.minX + rect.x * extent.width
+        let top = rect.y * extent.height
+        let originY = extent.minY + (extent.height - top - height)
+        let resolved = CGRect(x: left, y: originY, width: width, height: height)
+        let clipped = resolved.intersection(extent)
+        return clipped.isEmpty ? extent : clipped
+    }
+
+    func base(_ original: UIImage, recipe: PhotoRecipe, maxDimension: CGFloat? = nil) -> UIImage {
+        let precrop = imageBeforeCrop(original, recipe: recipe, maxDimension: maxDimension)
+        guard let crop = recipe.crop, let ci = CIImage(image: precrop) else { return precrop }
+        let rect = Self.resolvedCropRect(ratio: crop, normalized: recipe.cropRect, extent: ci.extent)
+        guard let cg = context.createCGImage(ci.cropped(to: rect), from: rect) else { return precrop }
         return UIImage(cgImage: cg)
     }
 

@@ -9,6 +9,7 @@ final class CameraService: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     @Published var error: String?
     @Published var captured: UIImage?
     @Published var beautyPreview: UIImage?
+    @Published var beautyFaceCount: Int?
     @Published var capturing = false
     @Published var hasFlash = false
     @Published var zoom: Double = 1
@@ -21,6 +22,9 @@ final class CameraService: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     private var configured = false
     private var wantsRunning = false
     private var previewEnabled = false // Main thread only.
+    private var previewToken = UUID() // Main thread only.
+    private var frameToken = UUID() // Frames queue only.
+    private var beautyStyle: BeautyStyle = .natural // Frames queue only.
     private var strength = 0.0 // Only read/written on frames queue.
     private var lastFrame = CFAbsoluteTimeGetCurrent()
     private var observers: [NSObjectProtocol] = []
@@ -56,8 +60,9 @@ final class CameraService: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         #endif
     }
     func stop() {
+        previewToken = UUID()
         queue.async { self.wantsRunning = false; if self.session.isRunning { self.session.stopRunning() } }
-        DispatchQueue.main.async { self.ready = false; self.beautyPreview = nil }
+        DispatchQueue.main.async { self.ready = false; self.beautyPreview = nil; self.beautyFaceCount = nil }
     }
     private func configure() throws {
         session.beginConfiguration(); defer { session.commitConfiguration() }
@@ -79,7 +84,7 @@ final class CameraService: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     }
     private func configureConnections() {
         if let connection = video.connection(with: .video) {
-            if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle = 90 }
+            if connection.videoRotationAngle != 90, connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle = 90 }
             if connection.isVideoMirroringSupported { connection.automaticallyAdjustsVideoMirroring = false; connection.isVideoMirrored = input?.device.position == .front }
         }
     }
@@ -100,10 +105,11 @@ final class CameraService: NSObject, ObservableObject, AVCapturePhotoCaptureDele
             DispatchQueue.main.async { self.beautyPreview = nil }
         }
     }
-    func setBeauty(_ value: Double) {
+    func setBeauty(_ value: Double, style: BeautyStyle = .natural) {
         previewEnabled = value > 0
-        frames.async { self.strength = value }
-        if value == 0 { DispatchQueue.main.async { self.beautyPreview = nil } }
+        let token = UUID(); previewToken = token
+        frames.async { self.strength = value; self.beautyStyle = style; self.frameToken = token }
+        if value == 0 { beautyPreview = nil; beautyFaceCount = nil }
     }
     func setZoom(_ value: Double) {
         queue.async {
@@ -157,13 +163,18 @@ final class CameraService: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         DispatchQueue.main.async { self.capturing = false; if let error { self.error = error.localizedDescription } }
     }
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        guard strength > 0, CFAbsoluteTimeGetCurrent() - lastFrame > 0.15, let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        guard strength > 0, CFAbsoluteTimeGetCurrent() - lastFrame > 1.0 / 12.0, let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         lastFrame = CFAbsoluteTimeGetCurrent()
         autoreleasepool {
             let ci = CIImage(cvPixelBuffer: buffer)
             let scale = 640 / max(ci.extent.width, ci.extent.height)
-            let image = ImageProcessor.shared.frame(ci.transformed(by: CGAffineTransform(scaleX: scale, y: scale)), strength: strength)
-            DispatchQueue.main.async { if self.previewEnabled && self.ready { self.beautyPreview = image } }
+            let token = frameToken
+            let result = ImageProcessor.shared.beautyFrame(ci.transformed(by: CGAffineTransform(scaleX: scale, y: scale)), strength: strength, style: beautyStyle)
+            DispatchQueue.main.async {
+                if self.previewEnabled && self.ready && self.previewToken == token {
+                    self.beautyPreview = result.image; self.beautyFaceCount = result.faceCount
+                }
+            }
         }
     }
 }
@@ -182,13 +193,20 @@ final class PreviewUIView: UIView {
     }
     override func layoutSubviews() {
         super.layoutSubviews()
-        if let connection = previewLayer.connection, connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle = 90 }
+        if let connection = previewLayer.connection, connection.videoRotationAngle != 90, connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle = 90 }
     }
 }
 struct CameraPreview: UIViewRepresentable {
     let camera: CameraService
     func makeUIView(context: Context) -> PreviewUIView {
         let view = PreviewUIView(); view.previewLayer.session = camera.session; view.previewLayer.videoGravity = .resizeAspectFill
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--verify-preview-lifecycle") {
+            view.isAccessibilityElement = true
+            view.accessibilityIdentifier = "previewInstance"
+            view.accessibilityValue = UUID().uuidString
+        }
+        #endif
         view.onFocus = camera.focus; return view
     }
     func updateUIView(_ uiView: PreviewUIView, context: Context) {}

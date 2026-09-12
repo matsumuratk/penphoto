@@ -6,6 +6,13 @@ struct PenPhotoApp: App {
     var body: some Scene { WindowGroup { HomeView().preferredColorScheme(.light) } }
 }
 
+private struct ViewfinderBoundsKey: PreferenceKey {
+    static var defaultValue: Anchor<CGRect>? { nil }
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = nextValue() ?? value
+    }
+}
+
 struct HomeView: View {
     @StateObject private var camera = CameraService()
     @Environment(\.scenePhase) private var scenePhase
@@ -15,7 +22,9 @@ struct HomeView: View {
     @AppStorage("captureAspect") private var captureAspect: CaptureAspect = .standard
     @State private var pendingCaptureRecipe: PhotoRecipe?
     @State private var beauty = false
-    @State private var strength = 0.45
+    @AppStorage("beautyStrength") private var strength = 0.55
+    @AppStorage("beautyStyle") private var beautyStyle: BeautyStyle = .natural
+    @State private var comparingBeauty = false
     @State private var grid = false
     @State private var flash = false
     @State private var timer = false
@@ -27,11 +36,11 @@ struct HomeView: View {
     @State private var showSettings = false
     var body: some View {
         GeometryReader { geometry in
-        Group {
+        ZStack {
         if captureAspect == .wide {
             wideCamera(safeArea: geometry.safeAreaInsets)
         } else {
-        let previewSize = captureAspect.previewSize(in: CGSize(width: geometry.size.width - 32, height: max(170, geometry.size.height - 305)))
+        let previewSize = captureAspect.previewSize(in: CGSize(width: geometry.size.width - 32, height: max(170, geometry.size.height - (beauty ? 380 : 305))))
         VStack(spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
                 HStack(spacing: 6) { Image(systemName: "pencil.tip.crop.circle").font(.title2); Text("PenPhoto").font(.system(size: 29, weight: .semibold, design: .serif)) }
@@ -40,9 +49,7 @@ struct HomeView: View {
             }.padding(.horizontal, 24).padding(.top, 14).padding(.bottom, 6)
             HStack { Text("今日を撮って、ことばを添えて。").font(.custom("Yomogi-Regular", size: 18)); Spacer(); Text("PHOTO DIARY").font(.system(size: 9, weight: .semibold)).tracking(1.8) }.padding(.horizontal, 24).padding(.bottom, 20)
             ZStack {
-                Color(red: 0.12, green: 0.17, blue: 0.15)
-                CameraPreview(camera: camera)
-                if beauty, let preview = camera.beautyPreview { GeometryReader { geo in Image(uiImage: preview).resizable().scaledToFill().frame(width: geo.size.width, height: geo.size.height).clipped() }.allowsHitTesting(false) }
+                Color.clear.allowsHitTesting(false)
                 if grid {
                     GeometryReader { geo in
                         Path { path in
@@ -91,11 +98,13 @@ struct HomeView: View {
                     }
                 }.padding(16).foregroundStyle(.white)
                 if let countdown { Text("\(countdown)").font(.system(size: 88, weight: .thin)).foregroundStyle(.white).shadow(radius: 10) }
-            }.frame(width: previewSize.width, height: previewSize.height).clipShape(RoundedRectangle(cornerRadius: 24)).frame(maxWidth: .infinity)
+            }.frame(width: previewSize.width, height: previewSize.height).clipShape(RoundedRectangle(cornerRadius: 24))
+                .anchorPreference(key: ViewfinderBoundsKey.self, value: .bounds) { $0 }.frame(maxWidth: .infinity)
             HStack(spacing: 24) {
                 Button { beauty = false } label: { Text("通常").fontWeight(beauty ? .regular : .bold).foregroundStyle(beauty ? .secondary : Palette.accent) }
                 Button { beauty = true } label: { Label("ビューティー", systemImage: "sparkles").fontWeight(beauty ? .bold : .regular).foregroundStyle(beauty ? Palette.accent : .secondary) }
             }.font(.subheadline).padding(.top, 18)
+            if beauty { beautyOptions.padding(.horizontal, 24).padding(.top, 10) }
             HStack(spacing: 10) {
                 Image(systemName: beauty ? "sparkles" : "sun.max").font(.caption)
                 if beauty { Slider(value: $strength, in: 0...1); Text("\(Int(strength * 100))%").font(.caption.monospacedDigit()).frame(width: 36) }
@@ -112,16 +121,38 @@ struct HomeView: View {
             }.padding(.horizontal, 30)
             Button { library = true } label: { HStack { Image(systemName: "square.stack"); Text("マイフォト"); Image(systemName: "chevron.right").font(.caption2) }.font(.caption).padding(.vertical, 14) }
         }
-        .background(Palette.paper.ignoresSafeArea()).foregroundStyle(Palette.ink).tint(Palette.accent)
+        .foregroundStyle(Palette.ink).tint(Palette.accent)
         }
         }
+        // Keep one preview layer attached to the session across both control layouts.
+        .backgroundPreferenceValue(ViewfinderBoundsKey.self) { anchor in
+            GeometryReader { proxy in
+                let rect = anchor.map { proxy[$0] } ?? .zero
+                ZStack {
+                    Color(red: 0.12, green: 0.17, blue: 0.15)
+                    CameraPreview(camera: camera)
+                    if beauty && !comparingBeauty, let preview = camera.beautyPreview {
+                        Image(uiImage: preview).resizable().scaledToFill()
+                            .frame(width: rect.width, height: rect.height).clipped().allowsHitTesting(false)
+                    }
+                }
+                .frame(width: rect.width, height: rect.height)
+                .clipShape(RoundedRectangle(cornerRadius: captureAspect == .wide ? 0 : 24))
+                .position(x: rect.midX, y: rect.midY)
+                .transaction { $0.animation = nil }
+            }
+        }
+        .background((captureAspect == .wide ? Color.black : Palette.paper).ignoresSafeArea())
         .statusBarHidden(captureAspect == .wide)
         .task { UIDevice.current.beginGeneratingDeviceOrientationNotifications(); if ProcessInfo.processInfo.arguments.contains("--sample-editor") { openSample() } else { camera.start() } }
-        .onChange(of: beauty) { _, _ in camera.setBeauty(beauty ? strength : 0) }
-        .onChange(of: strength) { _, value in camera.setBeauty(beauty ? value : 0) }
+        .onChange(of: beauty) { _, _ in comparingBeauty = false; refreshBeauty() }
+        .onChange(of: strength) { _, _ in refreshBeauty() }
+        .onChange(of: beautyStyle) { _, _ in refreshBeauty() }
+        .onChange(of: comparingBeauty) { _, _ in refreshBeauty() }
+        .onChange(of: camera.ready) { _, ready in if ready { refreshBeauty() } }
         .onChange(of: camera.captured) { _, image in
             guard let image else { return }
-            editing = EditingPhoto(project: PhotoProject(recipe: pendingCaptureRecipe ?? PhotoRecipe(beauty: beauty ? strength : 0, captureAspect: captureAspect)), image: image)
+            editing = EditingPhoto(project: PhotoProject(recipe: pendingCaptureRecipe ?? PhotoRecipe(beauty: beauty ? strength : 0, beautyStyle: beautyStyle, captureAspect: captureAspect)), image: image)
             pendingCaptureRecipe = nil
             camera.captured = nil
         }
@@ -151,14 +182,8 @@ struct HomeView: View {
         GeometryReader { screen in
             let viewfinderHeight = min(screen.size.height, screen.size.width * 16 / 9)
             ZStack {
-                Color.black
                 ZStack {
-                    Color(red: 0.12, green: 0.17, blue: 0.15)
-                    CameraPreview(camera: camera)
-                    if beauty, let preview = camera.beautyPreview {
-                        Image(uiImage: preview).resizable().scaledToFill()
-                            .frame(width: screen.size.width, height: viewfinderHeight).clipped().allowsHitTesting(false)
-                    }
+                    Color.clear.allowsHitTesting(false)
                     if grid {
                         Path { path in
                             for n in 1...2 {
@@ -187,6 +212,8 @@ struct HomeView: View {
                     if let countdown { Text("\(countdown)").font(.system(size: 88, weight: .thin)).shadow(radius: 10) }
                 }
                 .frame(width: screen.size.width, height: viewfinderHeight).clipped()
+                .anchorPreference(key: ViewfinderBoundsKey.self, value: .bounds) { $0 }
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("wideViewfinder")
 
                 VStack(spacing: 0) {
@@ -218,6 +245,7 @@ struct HomeView: View {
                             Button { beauty = false } label: { Text("写真").foregroundStyle(beauty ? .white : .yellow) }
                             Button { beauty = true } label: { Text("ビューティー").foregroundStyle(beauty ? .yellow : .white) }
                         }.font(.system(size: 14, weight: .semibold))
+                        if beauty { beautyOptions.padding(.horizontal, 24) }
                         HStack(spacing: 12) {
                             Image(systemName: beauty ? "sparkles" : "sun.max")
                             if beauty {
@@ -255,11 +283,26 @@ struct HomeView: View {
         }.ignoresSafeArea()
     }
 
+    private func refreshBeauty() { camera.setBeauty(beauty && !comparingBeauty ? strength : 0, style: beautyStyle) }
+    private var beautyOptions: some View {
+        VStack(spacing: 6) {
+            Picker("ビューティースタイル", selection: $beautyStyle) {
+                ForEach(BeautyStyle.allCases, id: \.self) { Text($0.title).tag($0) }
+            }.pickerStyle(.segmented).environment(\.colorScheme, captureAspect == .wide ? .dark : .light).accessibilityIdentifier("beautyStyle")
+            HStack {
+                Text(comparingBeauty ? "加工前を表示中" : !camera.ready ? "カメラの再開を待っています" : strength == 0 ? "加工なし" : camera.beautyFaceCount.map { $0 == 0 ? "顔を映すと適用されます" : "顔を\($0)人検出・適用中" } ?? "顔を探しています…")
+                    .font(.caption2).accessibilityIdentifier("beautyStatus")
+                Spacer()
+                Button(comparingBeauty ? "加工後に戻す" : "加工前と比較") { comparingBeauty.toggle() }
+                    .font(.caption.bold()).accessibilityIdentifier("beautyCompare")
+            }
+        }
+    }
     private func tool(_ icon: String, label: String, active: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) { Image(systemName: icon).frame(width: 36, height: 36).foregroundStyle(active ? .yellow : .white).background(.black.opacity(0.25), in: Circle()) }.accessibilityLabel(label).accessibilityValue(active ? "オン" : "オフ")
     }
     private func shutter() {
-        pendingCaptureRecipe = PhotoRecipe(beauty: beauty ? strength : 0, captureAspect: captureAspect)
+        pendingCaptureRecipe = PhotoRecipe(beauty: beauty ? strength : 0, beautyStyle: beautyStyle, captureAspect: captureAspect)
         guard timer else { camera.capture(flash: flash); return }
         countdownTask = Task {
             for value in (1...3).reversed() {
@@ -326,7 +369,7 @@ struct SettingsView: View {
         NavigationStack {
             List {
                 Section("PenPhotoについて") { Text("写真に、手書き風のひとことを残すカメラ。\n最初の開発版です。"); Text("写真と編集内容はこのiPhone内に保存されます。外部サーバーへの送信は行いません。"); Text("アプリを削除するとマイフォトも削除されます。残したい写真は「写真に保存」してください。") }
-                Section("ビューティー") { Text("顔周辺の平滑化を行う試作です。肌の領域を完全には分離できないため、髪や背景の一部がやわらかくなる場合があります。") }
+                Section("ビューティー") { Text("顔を検出し、目・眉・口・鼻や輪郭付近を保ちながら、肌をなめらかに整えます。3種類の仕上がりと強さを選べます。顔が見つからないときは加工しません。髪や背景と肌の境界は完全には分離できないため、仕上がりは撮影条件によって異なります。") }
                 Section("フォント") { Text("Yomogi — SIL Open Font License 1.1"); NavigationLink("フォントライセンス") { ScrollView { Text((try? String(contentsOf: Bundle.main.url(forResource: "OFL-Yomogi", withExtension: "txt")!, encoding: .utf8)) ?? "").font(.caption).padding() }.navigationTitle("ライセンス") } }
             }.navigationTitle("設定とアプリ情報").toolbar { ToolbarItem(placement: .topBarTrailing) { Button("閉じる") { dismiss() } } }
         }.tint(Palette.accent)

@@ -22,6 +22,8 @@ ui_sources = [build_file(p, 'sourcecode.swift') for p in ui_tests]
 resources = sorted(str(p.relative_to(ROOT)) for p in (ROOT / 'PenPhoto/Resources').iterdir() if p.is_file() or p.suffix == '.xcassets')
 sources = [build_file(p, 'sourcecode.swift') for p in swift]
 test_sources = [build_file(p, 'sourcecode.swift') for p in tests]
+fixture_files = [str(p.relative_to(ROOT)) for p in (ROOT / 'PenPhotoTests/Fixtures').glob('*.png')]
+fixture_builds = [build_file(p, 'image.png') for p in fixture_files]
 resource_files = [build_file(p, 'folder.assetcatalog' if p.endswith('.xcassets') else 'file') for p in resources]
 info = ref('PenPhoto/Info.plist', 'text.plist.xml')
 signing = ref('Config/Signing.xcconfig', 'text.xcconfig')
@@ -29,14 +31,16 @@ app_product = add('app_product', 'isa = PBXFileReference; explicitFileType = wra
 test_product = add('test_product', 'isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = PenPhotoTests.xctest; sourceTree = BUILT_PRODUCTS_DIR;')
 def phase(name, kind, files): return add(name, f'isa = {kind}; buildActionMask = 2147483647; files = {array(files)}; runOnlyForDeploymentPostprocessing = 0;')
 app_phases = [phase('sources', 'PBXSourcesBuildPhase', sources), phase('frameworks', 'PBXFrameworksBuildPhase', []), phase('resources', 'PBXResourcesBuildPhase', resource_files)]
-test_phases = [phase('test_sources', 'PBXSourcesBuildPhase', test_sources), phase('test_frameworks', 'PBXFrameworksBuildPhase', [])]
+test_phases = [phase('test_sources', 'PBXSourcesBuildPhase', test_sources), phase('test_frameworks', 'PBXFrameworksBuildPhase', []), phase('test_resources', 'PBXResourcesBuildPhase', fixture_builds)]
 def config_list(name, settings):
     configs = []
     for mode in ['Debug', 'Release']:
         values = dict(settings)
         values['SWIFT_OPTIMIZATION_LEVEL'] = '-Onone' if mode == 'Debug' else '-O'
         values['DEBUG_INFORMATION_FORMAT'] = 'dwarf' if mode == 'Debug' else 'dwarf-with-dsym'
-        if mode == 'Debug': values['ENABLE_TESTABILITY'] = 'YES'
+        if mode == 'Debug':
+            values['ENABLE_TESTABILITY'] = 'YES'
+            values['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = '$(inherited) DEBUG'
         body = ' '.join(f'{k} = {quoted(v)};' for k, v in values.items())
         base = f'baseConfigurationReference = {signing}; ' if name == 'project' else ''
         configs.append(add(name + mode, f'isa = XCBuildConfiguration; {base}buildSettings = {{ {body} }}; name = {mode};'))
@@ -53,7 +57,7 @@ ui_product = add('ui_product', 'isa = PBXFileReference; explicitFileType = wrapp
 ui_config = config_list('ui', {'PRODUCT_NAME':'$(TARGET_NAME)', 'PRODUCT_BUNDLE_IDENTIFIER':'$(PENPHOTO_BUNDLE_IDENTIFIER).uitests', 'GENERATE_INFOPLIST_FILE':'YES', 'TEST_TARGET_NAME':'PenPhoto'})
 ui_phases = [phase('ui_sources', 'PBXSourcesBuildPhase', ui_sources), phase('ui_frameworks', 'PBXFrameworksBuildPhase', [])]
 ui_target = add('ui_target', f'isa = PBXNativeTarget; buildConfigurationList = {ui_config}; buildPhases = {array(ui_phases)}; buildRules = (); dependencies = ({dep},); name = PenPhotoUITests; productName = PenPhotoUITests; productReference = {ui_product}; productType = "com.apple.product-type.bundle.ui-testing";')
-main = add('main', f'isa = PBXGroup; children = {array([uid(p) for p in swift + tests + ui_tests + resources] + [info, signing, products])}; sourceTree = "<group>";')
+main = add('main', f'isa = PBXGroup; children = {array([uid(p) for p in swift + tests + ui_tests + resources + fixture_files] + [info, signing, products])}; sourceTree = "<group>";')
 project = add('project', f'isa = PBXProject; attributes = {{ LastUpgradeCheck = 2600; }}; buildConfigurationList = {project_config}; compatibilityVersion = "Xcode 14.0"; developmentRegion = ja; knownRegions = (ja, en, Base,); mainGroup = {main}; productRefGroup = {products}; projectDirPath = ""; projectRoot = ""; targets = ({app_target}, {test_target}, {ui_target},);')
 folder = ROOT / 'PenPhoto.xcodeproj'; folder.mkdir(exist_ok=True)
 (folder / 'project.pbxproj').write_text('// !$*UTF8*$!\n{ archiveVersion = 1; classes = {}; objectVersion = 56; objects = {\n' + '\n'.join(f'{key} = {{ {body} }};' for key, body in objects.items()) + f'\n}}; rootObject = {project}; }}\n')

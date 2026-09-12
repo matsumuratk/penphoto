@@ -74,10 +74,26 @@ python3 scripts/run_on_device.py --device '<IdentifierまたはUDID>'
 - [ ] 前面カメラでも撮影できる。プレビューと保存写真の左右が意図どおり
 - [ ] 縦・横撮影で保存写真の向きと文字の位置が正しい
 - [ ] ズーム、ピント、露出、フラッシュ、タイマー、グリッドを操作できる
-- [ ] ビューティーを0／中／最大で比較し、目・眉・口や髪が不自然にならない
+- [ ] ビューティーでナチュラル／明るめ／なめらかを切り替え、0／中／最大の強度を比較する
+- [ ] 「加工前と比較」で元の表示へ戻り、加工後へ戻せる。比較中の撮影・保存でも選択した加工設定が反映される
+- [ ] 検出状態が表示され、目・眉・口・鼻や髪が不自然にならない
+- [ ] 編集画面の「写真・ビューティー」で仕上がりを変更し、下書きから開き直しても維持される
 - [ ] 顔なし・複数人でも撮影が止まらない
 - [ ] アプリを一度離れ、戻って撮影できる
 - [ ] 連続使用時の待ち時間、発熱、強制終了の有無を確認する
 
 [Appleの実機実行手順](https://developer.apple.com/documentation/xcode/running-your-app-on-simulated-or-physical-devices)
 [Appleのデベロッパモード説明](https://developer.apple.com/documentation/xcode/enabling-developer-mode-on-a-device)
+
+## ビューティーの実機自動テスト
+
+ロック解除済みのiPhoneのUDIDを指定します。実行中はロックしないでください。
+
+```sh
+xcodebuild -project PenPhoto.xcodeproj -scheme PenPhoto \
+  -destination 'platform=iOS,id=<iPhoneのUDID>' \
+  -derivedDataPath build-physical -allowProvisioningUpdates \
+  -only-testing:PenPhotoTests test
+```
+
+`testBeautyPreviewTimingOnPortraitFixture` は640pxの顔写真を30回処理し、中央値・p95をテストログと添付ファイルへ記録します。撮影・描画処理を含まないため、実際のライブ表示のフレーム速度とは別に評価してください。
