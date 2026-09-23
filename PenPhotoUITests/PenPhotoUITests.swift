@@ -105,6 +105,49 @@ final class PenPhotoUITests: XCTestCase {
     }
 
     @MainActor
+    func testPhotoTurnsBothWaysFromTheHeaderAndThePhotoTab() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--sample-editor"]
+        app.launch()
+        let photo = app.images["editingPhoto"]
+        XCTAssertTrue(photo.waitForExistence(timeout: 15))
+        let landscape = NSPredicate { _, _ in photo.exists && photo.frame.width > photo.frame.height }
+        let portrait = NSPredicate { _, _ in photo.exists && photo.frame.height > photo.frame.width }
+        // A quarter turn either way swaps the rendered photo's orientation; which way it turned is
+        // covered by the unit tests, since both directions look the same through the frame alone.
+        func expect(_ predicate: NSPredicate, _ message: String) {
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: nil)], timeout: 5), .completed, message)
+        }
+        expect(portrait, "The sample photo starts portrait.")
+
+        // Turning left and then right leaves the photo where it started.
+        app.buttons["rotatePhotoLeft"].tap()
+        expect(landscape, "Turning left reorients the photo.")
+        app.buttons["rotatePhoto"].tap()
+        expect(portrait, "Turning right reverses the left turn.")
+
+        // Undo and redo cover a left turn like any other edit.
+        app.buttons["rotatePhotoLeft"].tap()
+        expect(landscape, "Turning left reorients the photo again.")
+        app.buttons["取り消す"].tap()
+        expect(portrait, "Undo restores the orientation from before the left turn.")
+        app.buttons["やり直す"].tap()
+        expect(landscape, "Redo reapplies the left turn.")
+
+        // The same pair of turns is available from the photo tab.
+        app.buttons["写真・ビューティー"].tap()
+        let leftControl = app.buttons["rotatePhotoLeftControl"]
+        XCTAssertTrue(leftControl.waitForExistence(timeout: 5))
+        if !leftControl.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        XCTAssertTrue(leftControl.isHittable)
+        leftControl.tap()
+        expect(portrait, "The photo tab's left turn reorients the photo.")
+        app.buttons["rotatePhotoControl"].tap()
+        expect(landscape, "The photo tab's right turn reverses it.")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Rotation controls"; shot.lifetime = .keepAlways; add(shot)
+    }
+
+    @MainActor
     func testCropPositionCanBeAdjustedSavedReopenedAndUndone() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--sample-editor"]

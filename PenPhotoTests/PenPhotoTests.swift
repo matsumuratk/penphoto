@@ -17,6 +17,39 @@ final class PenPhotoTests: XCTestCase {
         XCTAssertEqual(rendered.size, CGSize(width: 600, height: 400))
         XCTAssertEqual(rendered.scale, 1)
     }
+    func testRotatingLeftUndoesRotatingRightAndWrapsWithoutGoingNegative() {
+        var recipe = PhotoRecipe()
+        recipe.rotate(clockwise: true)
+        XCTAssertEqual(recipe.quarterTurns, 1)
+        recipe.rotate(clockwise: false)
+        XCTAssertEqual(recipe.quarterTurns, 0)
+        recipe.rotate(clockwise: false)
+        XCTAssertEqual(recipe.quarterTurns, 3, "Turning left from zero must wrap, not store a negative count.")
+    }
+    func testLeftRotationRendersIdenticallyToThreeRightTurns() {
+        let original = quadrantImage(size: CGSize(width: 200, height: 300))
+        var left = PhotoRecipe()
+        left.rotate(clockwise: false)
+        let right = PhotoRecipe(quarterTurns: 3)
+        XCTAssertEqual(ImageProcessor.shared.render(original, recipe: left).pngData(),
+                       ImageProcessor.shared.render(original, recipe: right).pngData())
+    }
+    func testNegativeQuarterTurnsRenderLikeTheEquivalentForwardTurn() {
+        // Nothing in the editor stores a negative count, but a hand-written or future recipe could;
+        // the renderer must normalize it instead of trapping on an invalid range.
+        let original = quadrantImage(size: CGSize(width: 200, height: 300))
+        XCTAssertEqual(ImageProcessor.shared.render(original, recipe: PhotoRecipe(quarterTurns: -1)).pngData(),
+                       ImageProcessor.shared.render(original, recipe: PhotoRecipe(quarterTurns: 3)).pngData())
+    }
+    func testRotatingEitherDirectionResetsCropPositionButKeepsTheRatio() {
+        let positioned = NormalizedRect(x: 0.1, y: 0.2, width: 0.5, height: 0.4)
+        for clockwise in [true, false] {
+            var recipe = PhotoRecipe(crop: .portrait, cropRect: positioned)
+            recipe.rotate(clockwise: clockwise)
+            XCTAssertEqual(recipe.crop, .portrait, "clockwise: \(clockwise)")
+            XCTAssertNil(recipe.cropRect, "clockwise: \(clockwise)")
+        }
+    }
     func testExportBurnsCaptionIntoPixels() {
         let original = solidImage(size: CGSize(width: 400, height: 600))
         let plain = ImageProcessor.shared.render(original, recipe: PhotoRecipe())

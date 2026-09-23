@@ -39,8 +39,10 @@ struct EditorView: View {
                 HStack {
                     Text("写真に、ひとこと。").font(.custom("Yomogi-Regular", size: 25))
                     Spacer()
+                    Button { rotatePhoto(clockwise: false) } label: { Image(systemName: "rotate.left") }
+                        .accessibilityLabel("写真を左に90°回転").accessibilityIdentifier("rotatePhotoLeft")
                     Button { rotatePhoto() } label: { Image(systemName: "rotate.right") }
-                        .accessibilityLabel("写真を90°回転").accessibilityIdentifier("rotatePhoto")
+                        .accessibilityLabel("写真を右に90°回転").accessibilityIdentifier("rotatePhoto")
                     Button { undo() } label: { Image(systemName: "arrow.uturn.backward") }.disabled(undoStack.isEmpty).accessibilityLabel("取り消す")
                     Button { redo() } label: { Image(systemName: "arrow.uturn.forward") }.disabled(redoStack.isEmpty).accessibilityLabel("やり直す")
                 }.padding(.horizontal, 22).padding(.vertical, 12)
@@ -194,19 +196,18 @@ struct EditorView: View {
                 }.buttonStyle(.borderedProminent).disabled(loadingCropEditor).accessibilityIdentifier("openCropEditor")
             }
             Text("1:1・4:5・16:9・自由な比率から選び、ドラッグとピンチで位置と範囲を調整できます。").font(.caption).foregroundStyle(.secondary)
-            Button { rotatePhoto() } label: { Label("写真を90°回転", systemImage: "rotate.right") }
+            HStack(spacing: 10) {
+                Button { rotatePhoto(clockwise: false) } label: { Label("左に90°回転", systemImage: "rotate.left").frame(maxWidth: .infinity) }
+                    .buttonStyle(.bordered).accessibilityIdentifier("rotatePhotoLeftControl")
+                Button { rotatePhoto() } label: { Label("右に90°回転", systemImage: "rotate.right").frame(maxWidth: .infinity) }
+                    .buttonStyle(.bordered).accessibilityIdentifier("rotatePhotoControl")
+            }
         }.padding(20)
     }
-    private func rotatePhoto() {
+    private func rotatePhoto(clockwise: Bool = true) {
         typing = false
         checkpoint()
-        recipe.quarterTurns = (recipe.quarterTurns + 1) % 4
-        // Crop position is relative to the current (post-rotation) canvas, the same convention
-        // captions use to keep their relative position on the latest photo rather than being
-        // transformed. Unlike caption position, the crop RATIO must stay exact (1:1/4:5/16:9), so
-        // instead of carrying a now-mismatched rect forward, recenter it for the reshaped canvas;
-        // the ratio itself (and "no crop"/自由 choice) is preserved, only the custom position resets.
-        recipe.cropRect = nil
+        recipe.rotate(clockwise: clockwise)
     }
     private func openCropEditor() {
         typing = false
