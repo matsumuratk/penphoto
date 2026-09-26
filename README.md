@@ -10,6 +10,8 @@ SwiftUI / AVFoundation / Vision / Core Image / PhotoKit。外部パッケージ�
 バージョン1.0を2026-09-17（日本時間）に公開しました。無料、iOS 17.0以上、カテゴリは写真／ビデオ。
 提供者はTAKU MATSUMURAです。現在の配信地域は日本のApp Storeです。
 
+リポジトリのバージョンは1.1（ビルド8）です。1.1はApp Storeへ未申請で、ストア掲載文と申請手順は[リリースノート](docs/RELEASE_NOTES.md)に記載しています。
+
 ## 開発環境での実行
 
 1. `PenPhoto.xcodeproj` をXcodeで開きます。

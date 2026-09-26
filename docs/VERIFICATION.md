@@ -143,3 +143,15 @@ UIテストではサンプル画像を開き、文字の追加入力、下書き
   - この作業ツリーに存在しなかった `Config/Signing.local.xcconfig` をローカル署名設定（DEVELOPMENT_TEAM = YY9Y6VAGJY）として復元した。Git管理対象外。
   - 当初 codesign が `errSecInternalComponent` で失敗した。ログインキーチェーンが施錠されていたためで、解錠後は署名が通った。
   - 初回の実機テストはiPhoneのロックによりテストランナーが起動せず、3時間以上停止したため中断した。ロック解除後の再実行で成功。以後は `-destination-timeout 120 -test-timeouts-enabled YES` を付けて無限待機を避けている。
+
+## 1.1申請の準備（2026-09-26）
+
+- `PenPhoto/Info.plist` を `CFBundleShortVersionString = 1.1`、`CFBundleVersion = 8` に更新した。1.0（2026-09-17公開）からの利用者に見える変更は写真の左回転の追加のみ。ストア掲載文と申請手順は [リリースノート](RELEASE_NOTES.md) に記載した。
+- 1.1のビルドでシミュレータ（iPhone 17 Pro）の単体テスト29件・UIテスト5件がすべて成功（失敗0、単体4.18秒、UI120.56秒）。結果：`build/Logs/Test/Test-PenPhoto-2026.09.26_14-23-32-+0900.xcresult`。
+- ビルド番号8が公開済みビルドより大きいことは未確認。App Store Connectの公開済みビルド番号は公開メタデータから判別できないため、申請時に確認が必要。小さい／同じ場合はアップロードが拒否される。
+- Releaseコンフィグレーションでのアーカイブを試み、コンパイル・dSYM生成・App Intents処理・stripまでは成功したが、署名で失敗した。原因は2点。
+  - このMacのキーチェーンにApple Distribution証明書がなく、自動署名が開発用証明書「Apple Development: TAKU MATSUMURA (5ARL54J2R6)」とワイルドカードの開発用プロビジョニングプロファイルを選んだ。開発用署名のアーカイブはApp Storeへ提出できない。
+  - `codesign` が `errSecInternalComponent` で失敗した。ログインキーチェーンが施錠されているため（2026-09-23の実機テスト時と同じ事象）。
+  - Xcodeの設定にはチーム「TAKU MATSUMURA（YY9Y6VAGJY、Individual）」の記録が残っているが、Apple IDのサインイン一覧（`DVTDeveloperAccountManagerAppleIDLists`）は空で、現在サインインしていない。App Store Connect APIキー（`~/.appstoreconnect/private_keys/`）とfastlaneも未設定。
+  - このため、アーカイブとアップロードは未実施。XcodeでApple IDをサインインし配布証明書を作成した後に、Organizerから実行する必要がある。
+- App Storeの公開版は1.0のまま（`itunes.apple.com/lookup?id=6811245656&country=jp` で2026-09-26に確認。`version` = 1.0、`currentVersionReleaseDate` = 2026-09-17T09:29:41Z）。
