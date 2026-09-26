@@ -108,3 +108,38 @@ UIテストではサンプル画像を開き、文字の追加入力、下書き
 - 結果：`build/Logs/Test/Test-PenPhoto-2026.09.10_23-25-42-+0900.xcresult`。
 - シミュレータでの操作画面：![トリミング位置調整の操作画面](crop-positioned.png)
 - 実写・多様な構図でのトリミング操作感、自由比率のハンドル操作のしやすさは実機でのユーザー確認が必要。
+
+## App Storeでの公開（1.0、2026-09-17）
+
+- App Storeへの申請・審査・公開が完了した。日本のApp Storeでバージョン1.0を無料配信中。iOS 17.0以上、カテゴリは写真／ビデオ、提供者はTAKU MATSUMURA。
+- ストアページ：https://apps.apple.com/jp/app/penphoto/id6811245656
+- 公開日：2026-09-17（日本時間）。上記はApple提供のストアメタデータ（`itunes.apple.com/lookup?id=6811245656&country=jp`）で2026-09-21に確認した。
+- 米国ストアのURL（`/us/app/penphoto/id6811245656`）は404。現時点の配信地域は日本のみ。
+- iPhone 16e（iPhone17,5相当、iOS 26.7、Developer Mode有効）へ署名済みDebugビルドをインストールし、起動を確認した（2026-09-24）。`scripts/run_on_device.py --device 00008140-001A042A1E68401C` を使用。`codesign --verify --deep --strict` も通過。
+  - ユーザーが実機で動作確認を実施し、問題の報告はなかった。個別の確認項目ごとの記録は取っていない。
+  - iPhone 16eでの自動テストは実行していない（不要と判断された）。単体テストはシミュレータとiPhone 12 miniで成功済み。
+  - 注意：開発用ビルドのバンドルIDは公開版と同じ `jp.penphoto.app` のため、インストールすると端末上のApp Store版が置き換わる。公開版に戻すにはApp Storeから再インストールする。
+- リポジトリの `PenPhoto/Info.plist` の`CFBundleShortVersionString`を公開版に合わせて 1.0 にした（2026-09-22）。`CFBundleVersion`（ビルド番号）は公開メタデータから判別できないため 7 のまま。次回申請時はApp Store Connectで公開済みビルド番号を確認し、それより大きい値にする必要がある。
+- この記録はストアの公開状態の確認であり、公開版バイナリとこのリポジトリのコードが同一であることを検証したものではない。
+
+## 写真の左回転を追加（2026-09-21実装、2026-09-23〜24検証）
+
+- 右回転だけだった写真の90度回転を、左右どちらにも回せるようにした。編集画面上部に左回転ボタンを追加し、「写真・ビューティー」タブの回転操作も左右2つのボタンに変更した。
+- 回転の向きの計算を`PhotoRecipe.rotate(clockwise:)`へ移し、`quarterTurns`が常に0..<4に収まるようにした（左回転は+3として扱う）。トリミング比率を保ったまま位置だけ中央へ戻す既存の挙動は両方向で共通。
+- `ImageProcessor`の回転適用を負の`quarterTurns`でも破綻しないよう正規化した。
+- 単体テスト4件を追加（左右回転の往復、左回転と右3回の描画一致、負の回転数の正規化、両方向でのトリミング位置リセット）。単体テストは合計29件になった。
+- 実機（iPhone 12 mini、iPhone13,1）で単体テスト29件がすべて成功（2026-09-23 11:00 JST、失敗0、実行時間1.33秒）。追加した4件も個別に成功を確認した。
+  - `testRotatingLeftUndoesRotatingRightAndWrapsWithoutGoingNegative`
+  - `testLeftRotationRendersIdenticallyToThreeRightTurns`（左回転1回と右回転3回の描画結果がピクセル一致）
+  - `testNegativeQuarterTurnsRenderLikeTheEquivalentForwardTurn`
+  - `testRotatingEitherDirectionResetsCropPositionButKeepsTheRatio`
+  - 結果：`build-physical/Logs/Test/Test-PenPhoto-2026.09.23_11-00-14-+0900.xcresult`
+- シミュレータ（iPhone 17 Pro、iOS 26.5）で単体テスト29件・UIテスト5件が成功（2026-09-23）。
+- UIテスト`testPhotoTurnsBothWaysFromTheHeaderAndThePhotoTab`を追加した。画面上部の左回転→右回転で元の向きに戻ること、左回転が取り消し・やり直しの対象になること、写真タブの左右ボタンでも同じ操作ができることを確認する。左右どちらに回ったかは枠の縦横だけでは区別できないため、向きそのものは単体テスト側で担保している。
+- 既存UIテストが使う`rotatePhoto`は右回転に残したため、既存4件は変更していない。
+- 実行環境の問題とその解消：
+  - 2026-09-21時点ではシミュレータが使用不可だった。実行中の CoreSimulatorService が 1051.55.0 と古く、インストール済みフレームワークおよび Xcode 27.0 の要求 (1171.7.0) と食い違い、`Simulator device support disabled` で対象デバイスが見つからなかった。Xcode 27.0 更新後にサービスが入れ替わっていなかったことが原因で、2026-09-23には解消していた（macOS 26.6.2 / Xcode 27.0 / CoreSimulator 1171.7）。
+  - 解消後の初回実行では、UIテスト完了後に `Unable to boot the Simulator`（`XPC error talking to SimLaunchHostService: Connection invalid`）で単体テストの起動に失敗した。`xcrun simctl shutdown all` と CoreSimulatorService の再起動後、再実行して成功した。
+  - この作業ツリーに存在しなかった `Config/Signing.local.xcconfig` をローカル署名設定（DEVELOPMENT_TEAM = YY9Y6VAGJY）として復元した。Git管理対象外。
+  - 当初 codesign が `errSecInternalComponent` で失敗した。ログインキーチェーンが施錠されていたためで、解錠後は署名が通った。
+  - 初回の実機テストはiPhoneのロックによりテストランナーが起動せず、3時間以上停止したため中断した。ロック解除後の再実行で成功。以後は `-destination-timeout 120 -test-timeouts-enabled YES` を付けて無限待機を避けている。

@@ -91,6 +91,20 @@ struct PhotoRecipe: Codable, Equatable {
     var captureAspect: CaptureAspect? = nil // nil preserves projects created before capture ratios were added.
 }
 
+extension PhotoRecipe {
+    /// Turns the photo a quarter turn in either direction. `quarterTurns` is kept inside `0..<4`
+    /// so the renderer can keep applying it as a plain repeat count of clockwise turns.
+    mutating func rotate(clockwise: Bool) {
+        quarterTurns = (quarterTurns + (clockwise ? 1 : 3)) % 4
+        // Crop position is relative to the current (post-rotation) canvas, the same convention
+        // captions use to keep their relative position on the latest photo rather than being
+        // transformed. Unlike caption position, the crop RATIO must stay exact (1:1/4:5/16:9), so
+        // instead of carrying a now-mismatched rect forward, recenter it for the reshaped canvas;
+        // the ratio itself (and "no crop"/自由 choice) is preserved, only the custom position resets.
+        cropRect = nil
+    }
+}
+
 struct PhotoProject: Codable, Identifiable {
     var id = UUID()
     var createdAt = Date()

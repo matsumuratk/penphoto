@@ -113,7 +113,8 @@ final class ImageProcessor: @unchecked Sendable {
         ci = beauty(ci, strength: recipe.beauty, style: recipe.beautyStyle ?? .natural)
         ci = ci.applyingFilter("CIColorControls", parameters: [kCIInputBrightnessKey: recipe.brightness])
         if let aspect = recipe.captureAspect { ci = ci.cropped(to: aspect.cropRect(in: ci.extent)) }
-        for _ in 0..<(recipe.quarterTurns % 4) { ci = ci.oriented(.right) }
+        // Normalizing into 0..<4 also covers a negative count, which `0..<` would otherwise trap on.
+        for _ in 0..<(((recipe.quarterTurns % 4) + 4) % 4) { ci = ci.oriented(.right) }
         guard let cg = context.createCGImage(ci, from: ci.extent) else { return input }
         return UIImage(cgImage: cg)
     }
