@@ -215,4 +215,24 @@ final class PenPhotoUITests: XCTestCase {
         app.buttons["clearCrop"].tap()
         XCTAssertEqual(app.staticTexts["cropLabel"].label, "元の比率")
     }
+
+    @MainActor
+    func testAddedCaptionStartsEmptyWithAPlaceholder() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--sample-editor"]
+        app.launch()
+        let field = app.textFields["captionField"]
+        XCTAssertTrue(field.waitForExistence(timeout: 15))
+        app.buttons["追加"].tap()
+
+        // The new caption holds no text: the field only hints with a placeholder, so typing starts
+        // right away instead of making the user clear "ひとこと" first.
+        XCTAssertTrue(app.buttons["新しいことば"].waitForExistence(timeout: 5))
+        XCTAssertEqual(field.value as? String, "ひとこと")
+        let ghost = XCTAttachment(screenshot: app.screenshot()); ghost.name = "Empty caption"; ghost.lifetime = .keepAlways; add(ghost)
+        field.tap()
+        field.typeText("placeholder test")
+        XCTAssertEqual(field.value as? String, "placeholder test")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Caption placeholder"; shot.lifetime = .keepAlways; add(shot)
+    }
 }
