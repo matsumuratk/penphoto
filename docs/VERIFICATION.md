@@ -155,3 +155,13 @@ UIテストではサンプル画像を開き、文字の追加入力、下書き
   - Xcodeの設定にはチーム「TAKU MATSUMURA（YY9Y6VAGJY、Individual）」の記録が残っているが、Apple IDのサインイン一覧（`DVTDeveloperAccountManagerAppleIDLists`）は空で、現在サインインしていない。App Store Connect APIキー（`~/.appstoreconnect/private_keys/`）とfastlaneも未設定。
   - このため、アーカイブとアップロードは未実施。XcodeでApple IDをサインインし配布証明書を作成した後に、Organizerから実行する必要がある。
 - App Storeの公開版は1.0のまま（`itunes.apple.com/lookup?id=6811245656&country=jp` で2026-09-26に確認。`version` = 1.0、`currentVersionReleaseDate` = 2026-09-17T09:29:41Z）。
+
+## 1.1（ビルド9）の申請（2026-10-09）
+
+- カメラのプレビューのピンチズームを追加し、ビルド番号を9に上げた。TestFlightのビルド9を実機に入れ、ピンチズームに問題がないことを利用者が確認した。
+- シミュレータ（iPhone 17 Pro）で単体テスト29件・UIテスト6件がすべて成功（失敗0、単体4.37秒、UI126.08秒）。
+- アップロードはApp Store Connect APIキーで行った。このキーではクラウド管理の配布証明書を使えないため、ローカルのApple Distribution証明書で作ったApp Storeプロファイル「PenPhoto App Store」で手動署名した。
+- ビルド9は当初「輸出コンプライアンス未回答」で止まり、PenPhotoには社内テストグループも無かったためTestFlightに出なかった。暗号化は使っていないと回答し、Info.plistに `ITSAppUsesNonExemptEncryption = NO` を追加した（ビルド10以降で有効）。社内テストグループ「内部テスト」（全ビルドを自動配信）を作り、テスターを追加した。
+- ストアのスクリーンショットのうち編集画面の2枚を、iPhone 17 Pro Maxのシミュレータ（1320×2868）で撮り直して差し替えた。
+- 1.1をApp Store Connect APIで作成し、ビルド9・「このバージョンの新機能」を設定して審査に提出した（2026-10-09、状態 WAITING_FOR_REVIEW、承認後に自動公開）。
+
