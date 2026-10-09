@@ -28,7 +28,14 @@ struct EditorView: View {
         _savedRecipe = State(initialValue: editing.project.recipe)
         _selected = State(initialValue: editing.project.recipe.captions.first?.id)
     }
+    private static let captionPlaceholder = "ひとこと"
     private var selectedIndex: Int? { recipe.captions.firstIndex { $0.id == selected } }
+    /// An empty caption is only a placeholder: the preview draws it faintly so it can still be
+    /// found and dragged, while `composite` keeps it out of the saved photo.
+    private func previewCaption(_ caption: Caption) -> Caption {
+        guard caption.text.isEmpty else { return caption }
+        var ghost = caption; ghost.text = Self.captionPlaceholder; return ghost
+    }
     private var renderKey: String {
         let rect = recipe.cropRect.map { "\($0.x)_\($0.y)_\($0.width)_\($0.height)" } ?? "default"
         return "\(comparingBeauty)-\(recipe.beautyStyle?.rawValue ?? "natural")-\(recipe.beauty)-\(recipe.brightness)-\(recipe.quarterTurns)-\(recipe.crop?.rawValue ?? "original")-\(rect)"
@@ -53,9 +60,10 @@ struct EditorView: View {
                         ZStack {
                             Image(uiImage: base).resizable().accessibilityIdentifier("editingPhoto")
                             ForEach(recipe.captions) { caption in
-                                let label = ImageProcessor.shared.captionImage(caption, imageWidth: 1000)
+                                let label = ImageProcessor.shared.captionImage(previewCaption(caption), imageWidth: 1000)
                                 Image(uiImage: label).resizable()
                                     .frame(width: label.size.width * size.width / 1000, height: label.size.height * size.width / 1000)
+                                    .opacity(caption.text.isEmpty ? 0.45 : 1)
                                     .overlay { if selected == caption.id { RoundedRectangle(cornerRadius: 4).stroke(.white.opacity(0.8), style: StrokeStyle(lineWidth: 1, dash: [4, 3])) } }
                                     .rotationEffect(.degrees(caption.rotation))
                                     .position(x: caption.x * size.width, y: caption.y * size.height)
@@ -135,11 +143,11 @@ struct EditorView: View {
                         }
                     }
                 }
-                Button { checkpoint(); let caption = Caption(text: "ひとこと", y: 0.7 - Double(recipe.captions.count % 4) * 0.12); recipe.captions.append(caption); selected = caption.id; typing = true } label: { Label("追加", systemImage: "plus") }
+                Button { checkpoint(); let caption = Caption(y: 0.7 - Double(recipe.captions.count % 4) * 0.12); recipe.captions.append(caption); selected = caption.id; typing = true } label: { Label("追加", systemImage: "plus") }
                     .disabled(recipe.captions.count >= 8)
             }
             if let index = selectedIndex {
-                TextField("どこで、誰と、どんな日？", text: Binding(get: { recipe.captions[index].text }, set: { new in
+                TextField(Self.captionPlaceholder, text: Binding(get: { recipe.captions[index].text }, set: { new in
                     // SwiftUI can re-invoke this on focus loss (e.g. dismissing the keyboard) with the
                     // text unchanged; skipping the no-op guards against a redundant checkpoint landing
                     // on the undo stack right after an edit made elsewhere (such as rotating the photo
