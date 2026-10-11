@@ -183,13 +183,19 @@ final class PreviewUIView: UIView {
     override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
     var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
     var onFocus: ((CGPoint) -> Void)?
+    /// Called with the pinch scale relative to where the gesture began; `true` marks the start.
+    var onPinch: ((CGFloat, Bool) -> Void)?
     override init(frame: CGRect) {
         super.init(frame: frame)
         addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapped(_:))))
+        addGestureRecognizer(UIPinchGestureRecognizer(target: self, action: #selector(pinched(_:))))
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     @objc private func tapped(_ gesture: UITapGestureRecognizer) {
         onFocus?(previewLayer.captureDevicePointConverted(fromLayerPoint: gesture.location(in: self)))
+    }
+    @objc private func pinched(_ gesture: UIPinchGestureRecognizer) {
+        if gesture.state == .began || gesture.state == .changed { onPinch?(gesture.scale, gesture.state == .began) }
     }
     override func layoutSubviews() {
         super.layoutSubviews()
@@ -207,7 +213,15 @@ struct CameraPreview: UIViewRepresentable {
             view.accessibilityValue = UUID().uuidString
         }
         #endif
-        view.onFocus = camera.focus; return view
+        view.onFocus = camera.focus
+        // The zoom sliders already push `camera.zoom` to the device, so the pinch only moves the value.
+        var startZoom = camera.zoom
+        view.onPinch = { [camera] scale, began in
+            guard camera.ready else { return }
+            if began { startZoom = camera.zoom }
+            camera.zoom = max(1, min(startZoom * Double(scale), camera.maxZoom))
+        }
+        return view
     }
     func updateUIView(_ uiView: PreviewUIView, context: Context) {}
 }

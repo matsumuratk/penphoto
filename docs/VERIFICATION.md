@@ -143,3 +143,26 @@ UIテストではサンプル画像を開き、文字の追加入力、下書き
   - この作業ツリーに存在しなかった `Config/Signing.local.xcconfig` をローカル署名設定（DEVELOPMENT_TEAM = YY9Y6VAGJY）として復元した。Git管理対象外。
   - 当初 codesign が `errSecInternalComponent` で失敗した。ログインキーチェーンが施錠されていたためで、解錠後は署名が通った。
   - 初回の実機テストはiPhoneのロックによりテストランナーが起動せず、3時間以上停止したため中断した。ロック解除後の再実行で成功。以後は `-destination-timeout 120 -test-timeouts-enabled YES` を付けて無限待機を避けている。
+
+## 1.1申請の準備（2026-09-26）
+
+- `PenPhoto/Info.plist` を `CFBundleShortVersionString = 1.1`、`CFBundleVersion = 8` に更新した。1.0（2026-09-17公開）からの利用者に見える変更は写真の左回転の追加のみ。ストア掲載文と申請手順は [リリースノート](RELEASE_NOTES.md) に記載した。
+- 1.1のビルドでシミュレータ（iPhone 17 Pro）の単体テスト29件・UIテスト5件がすべて成功（失敗0、単体4.18秒、UI120.56秒）。結果：`build/Logs/Test/Test-PenPhoto-2026.09.26_14-23-32-+0900.xcresult`。
+- ビルド番号8が公開済みビルドより大きいことは未確認。App Store Connectの公開済みビルド番号は公開メタデータから判別できないため、申請時に確認が必要。小さい／同じ場合はアップロードが拒否される。
+- Releaseコンフィグレーションでのアーカイブを試み、コンパイル・dSYM生成・App Intents処理・stripまでは成功したが、署名で失敗した。原因は2点。
+  - このMacのキーチェーンにApple Distribution証明書がなく、自動署名が開発用証明書「Apple Development: TAKU MATSUMURA (5ARL54J2R6)」とワイルドカードの開発用プロビジョニングプロファイルを選んだ。開発用署名のアーカイブはApp Storeへ提出できない。
+  - `codesign` が `errSecInternalComponent` で失敗した。ログインキーチェーンが施錠されているため（2026-09-23の実機テスト時と同じ事象）。
+  - Xcodeの設定にはチーム「TAKU MATSUMURA（YY9Y6VAGJY、Individual）」の記録が残っているが、Apple IDのサインイン一覧（`DVTDeveloperAccountManagerAppleIDLists`）は空で、現在サインインしていない。App Store Connect APIキー（`~/.appstoreconnect/private_keys/`）とfastlaneも未設定。
+  - このため、アーカイブとアップロードは未実施。XcodeでApple IDをサインインし配布証明書を作成した後に、Organizerから実行する必要がある。
+- App Storeの公開版は1.0のまま（`itunes.apple.com/lookup?id=6811245656&country=jp` で2026-09-26に確認。`version` = 1.0、`currentVersionReleaseDate` = 2026-09-17T09:29:41Z）。
+
+## 1.1（ビルド9）の申請（2026-10-09）
+
+- カメラのプレビューのピンチズームを追加し、ビルド番号を9に上げた。TestFlightのビルド9を実機に入れ、ピンチズームに問題がないことを利用者が確認した。
+- シミュレータ（iPhone 17 Pro）で単体テスト29件・UIテスト6件がすべて成功（失敗0、単体4.37秒、UI126.08秒）。
+- アップロードはApp Store Connect APIキーで行った。このキーではクラウド管理の配布証明書を使えないため、ローカルのApple Distribution証明書で作ったApp Storeプロファイル「PenPhoto App Store」で手動署名した。
+- ビルド9は当初「輸出コンプライアンス未回答」で止まり、PenPhotoには社内テストグループも無かったためTestFlightに出なかった。暗号化は使っていないと回答し、Info.plistに `ITSAppUsesNonExemptEncryption = NO` を追加した（ビルド10以降で有効）。社内テストグループ「内部テスト」（全ビルドを自動配信）を作り、テスターを追加した。
+- ストアのスクリーンショットのうち編集画面の2枚を、iPhone 17 Pro Maxのシミュレータ（1320×2868）で撮り直して差し替えた。
+- 1.1をApp Store Connect APIで作成し、ビルド9・「このバージョンの新機能」を設定して審査に提出した（2026-10-09、状態 WAITING_FOR_REVIEW、承認後に自動公開）。
+
+- 審査を通過し、2026-10-09 22:53（日本時間）に公開された。App Store Connect の状態は READY_FOR_SALE、公開メタデータ（`itunes.apple.com/lookup?id=6811245656&country=jp`）の `version` = 1.1 を2026-10-10に確認した。
