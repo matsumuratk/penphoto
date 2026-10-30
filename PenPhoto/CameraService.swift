@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreMotion
 import SwiftUI
 import CoreImage
 import UIKit
@@ -28,6 +29,8 @@ final class CameraService: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     private var strength = 0.0 // Only read/written on frames queue.
     private var lastFrame = CFAbsoluteTimeGetCurrent()
     private var observers: [NSObjectProtocol] = []
+    private let motion = CMMotionManager()
+    private var heldOrientation: UIDeviceOrientation = .portrait // Main thread only.
 
     override init() {
         super.init()
@@ -46,6 +49,7 @@ final class CameraService: NSObject, ObservableObject, AVCapturePhotoCaptureDele
         return
         #else
         queue.async { self.wantsRunning = true }
+        startOrientationUpdates()
         AVCaptureDevice.requestAccess(for: .video) { granted in
             guard granted else { DispatchQueue.main.async { self.error = "撮影するには、設定でカメラへのアクセスを許可してください。" }; return }
             self.queue.async {
@@ -61,6 +65,7 @@ final class CameraService: NSObject, ObservableObject, AVCapturePhotoCaptureDele
     }
     func stop() {
         previewToken = UUID()
+        motion.stopDeviceMotionUpdates()
         queue.async { self.wantsRunning = false; if self.session.isRunning { self.session.stopRunning() } }
         DispatchQueue.main.async { self.ready = false; self.beautyPreview = nil; self.beautyFaceCount = nil }
     }
@@ -135,11 +140,38 @@ final class CameraService: NSObject, ObservableObject, AVCapturePhotoCaptureDele
             catch { DispatchQueue.main.async { self.error = "明るさを変更できませんでした。" } }
         }
     }
+    /// The UI is locked to portrait, and `UIDevice.orientation` stays portrait under the system rotation
+    /// lock and reads `.faceUp` when the phone is held flat. Gravity tells how the phone is actually held.
+    private func startOrientationUpdates() {
+        guard motion.isDeviceMotionAvailable, !motion.isDeviceMotionActive else { return }
+        motion.deviceMotionUpdateInterval = 0.1
+        motion.startDeviceMotionUpdates(to: .main) { [weak self] data, _ in
+            guard let self, let gravity = data?.gravity else { return }
+            self.heldOrientation = Self.orientation(gravityX: gravity.x, y: gravity.y, z: gravity.z, previous: self.heldOrientation)
+        }
+    }
+    /// Keeps `previous` while the phone is flat or between two orientations, so a slight tilt doesn't flip the photo.
+    static func orientation(gravityX x: Double, y: Double, z: Double, previous: UIDeviceOrientation) -> UIDeviceOrientation {
+        if abs(z) > 0.8 { return previous }
+        let margin = 0.2
+        if abs(x) > abs(y) + margin { return x > 0 ? .landscapeRight : .landscapeLeft }
+        if abs(y) > abs(x) + margin { return y > 0 ? .portraitUpsideDown : .portrait }
+        return previous
+    }
+    static func rotationAngle(for orientation: UIDeviceOrientation) -> CGFloat {
+        switch orientation {
+        case .landscapeLeft: return 0
+        case .landscapeRight: return 180
+        case .portraitUpsideDown: return 270
+        default: return 90
+        }
+    }
     func capture(flash: Bool) {
         guard ready, !capturing else { return }
         capturing = true
-        let orientation = UIDevice.current.orientation
-        let angle: CGFloat = orientation == .landscapeLeft ? 0 : orientation == .landscapeRight ? 180 : orientation == .portraitUpsideDown ? 270 : 90
+        let device = UIDevice.current.orientation
+        let orientation = motion.isDeviceMotionActive ? heldOrientation : (device.isValidInterfaceOrientation ? device : .portrait)
+        let angle = Self.rotationAngle(for: orientation)
         queue.async {
             guard self.session.isRunning else { DispatchQueue.main.async { self.capturing = false }; return }
             if let connection = self.output.connection(with: .video) {
