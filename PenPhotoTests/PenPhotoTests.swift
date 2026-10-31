@@ -11,6 +11,34 @@ final class PenPhotoTests: XCTestCase {
         let recipe = PhotoRecipe(captions: [Caption(text: "京都で、ゆきと。☕️\nまた来よう", x: 0.23, y: 0.65, size: 0.07, rotation: -12, ink: .coral)], beauty: 0.4, brightness: 0.05, quarterTurns: 1)
         XCTAssertEqual(try JSONDecoder().decode(PhotoRecipe.self, from: JSONEncoder().encode(recipe)), recipe)
     }
+    func testHeldOrientationFollowsGravityAndIgnoresFlatOrAmbiguousTilt() {
+        func held(_ x: Double, _ y: Double, _ z: Double, previous: UIDeviceOrientation = .portrait) -> UIDeviceOrientation {
+            CameraService.orientation(gravityX: x, y: y, z: z, previous: previous)
+        }
+        XCTAssertEqual(held(0, -1, 0), .portrait)
+        XCTAssertEqual(held(0, 1, 0), .portraitUpsideDown)
+        // Top of the phone turned left (home side on the right) puts gravity along -x.
+        XCTAssertEqual(held(-1, 0, 0), .landscapeLeft)
+        XCTAssertEqual(held(1, 0, 0), .landscapeRight)
+        // Flat on a table, or halfway between two orientations, keeps the last clear reading.
+        XCTAssertEqual(held(0.1, -0.1, -0.99, previous: .landscapeLeft), .landscapeLeft)
+        XCTAssertEqual(held(-0.62, -0.62, -0.3, previous: .landscapeLeft), .landscapeLeft)
+        XCTAssertEqual(held(-0.62, -0.62, -0.3, previous: .portrait), .portrait)
+    }
+    func testCaptureRotationAngleMatchesHeldOrientation() {
+        XCTAssertEqual(CameraService.rotationAngle(for: .portrait), 90)
+        XCTAssertEqual(CameraService.rotationAngle(for: .landscapeLeft), 0)
+        XCTAssertEqual(CameraService.rotationAngle(for: .landscapeRight), 180)
+        XCTAssertEqual(CameraService.rotationAngle(for: .portraitUpsideDown), 270)
+        XCTAssertEqual(CameraService.rotationAngle(for: .faceUp), 90)
+    }
+    func testCaptureAspectCropKeepsLandscapePhotosLandscape() {
+        let rect = CaptureAspect.standard.cropRect(in: CGRect(x: 0, y: 0, width: 4032, height: 3024))
+        XCTAssertGreaterThan(rect.width, rect.height)
+        XCTAssertEqual(rect.width / rect.height, 4.0 / 3.0, accuracy: 0.001)
+        let wide = CaptureAspect.wide.cropRect(in: CGRect(x: 0, y: 0, width: 4032, height: 3024))
+        XCTAssertEqual(wide.width / wide.height, 16.0 / 9.0, accuracy: 0.001)
+    }
     func testRotationSwapsPixelDimensions() {
         let original = solidImage(size: CGSize(width: 400, height: 600))
         let rendered = ImageProcessor.shared.render(original, recipe: PhotoRecipe(quarterTurns: 1))
