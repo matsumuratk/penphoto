@@ -235,4 +235,40 @@ final class PenPhotoUITests: XCTestCase {
         XCTAssertEqual(field.value as? String, "placeholder test")
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Caption placeholder"; shot.lifetime = .keepAlways; add(shot)
     }
+
+    @MainActor
+    func testSaveButtonsStayDisabledUntilTheNextEdit() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--sample-editor", "-returnToCameraAfterSave", "NO"]
+        app.launch()
+        let field = app.textFields["captionField"]
+        XCTAssertTrue(field.waitForExistence(timeout: 15))
+        let draft = app.buttons["saveDraft"], export = app.buttons["saveToPhotos"]
+        XCTAssertTrue(draft.isEnabled, "A new capture can be saved right away.")
+        draft.tap()
+        XCTAssertTrue(app.alerts["PenPhoto"].waitForExistence(timeout: 15))
+        app.alerts.buttons["OK"].tap()
+        XCTAssertFalse(draft.isEnabled, "Saving the same draft again is blocked.")
+        XCTAssertTrue(export.isEnabled, "A draft save doesn't count as saving to Photos.")
+        field.tap()
+        field.typeText("!")
+        XCTAssertTrue(draft.isEnabled, "Any further edit makes the draft savable again.")
+        app.buttons["取り消す"].tap()
+        XCTAssertFalse(draft.isEnabled, "Undoing back to the saved state blocks it again.")
+    }
+
+    @MainActor
+    func testSavingReturnsToCameraWhenEnabled() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--sample-editor", "-returnToCameraAfterSave", "YES"]
+        app.launch()
+        let field = app.textFields["captionField"]
+        XCTAssertTrue(field.waitForExistence(timeout: 15))
+        app.buttons["saveDraft"].tap()
+        let closed = NSPredicate { _, _ in !field.exists }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: closed, object: nil)], timeout: 15), .completed, "The editor closed back to the camera.")
+        XCTAssertTrue(app.descendants(matching: .any)["savedNotice"].waitForExistence(timeout: 5), "The camera confirms the save.")
+        XCTAssertFalse(app.alerts["PenPhoto"].exists, "No alert is left behind on the camera.")
+    }
 }
+

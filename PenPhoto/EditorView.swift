@@ -3,9 +3,14 @@ import SwiftUI
 struct EditorView: View {
     let editing: EditingPhoto
     var onSaved: () -> Void
+    /// Set when the editor should close after a successful save; receives the confirmation to show.
+    var onReturnAfterSave: ((String) -> Void)?
     @Environment(\.dismiss) private var dismiss
     @State private var recipe: PhotoRecipe
     @State private var savedRecipe: PhotoRecipe
+    /// What each save button last wrote; a button stays disabled until the recipe moves on from it.
+    @State private var draftRecipe: PhotoRecipe?
+    @State private var exportedRecipe: PhotoRecipe?
     @State private var selected: UUID?
     @State private var base: UIImage?
     @State private var undoStack: [PhotoRecipe] = []
@@ -22,10 +27,12 @@ struct EditorView: View {
     @State private var showCropEditor = false
     @State private var cropSourceImage: UIImage?
     @State private var loadingCropEditor = false
-    init(editing: EditingPhoto, onSaved: @escaping () -> Void) {
-        self.editing = editing; self.onSaved = onSaved
+    /// `alreadySaved` marks a project reopened from マイフォト, whose draft is already stored.
+    init(editing: EditingPhoto, alreadySaved: Bool = false, onReturnAfterSave: ((String) -> Void)? = nil, onSaved: @escaping () -> Void) {
+        self.editing = editing; self.onSaved = onSaved; self.onReturnAfterSave = onReturnAfterSave
         _recipe = State(initialValue: editing.project.recipe)
         _savedRecipe = State(initialValue: editing.project.recipe)
+        _draftRecipe = State(initialValue: alreadySaved ? editing.project.recipe : nil)
         _selected = State(initialValue: editing.project.recipe.captions.first?.id)
     }
     private static let captionPlaceholder = "ひとこと"
@@ -92,7 +99,9 @@ struct EditorView: View {
                 }.frame(height: typing ? 160 : 230)
                 HStack(spacing: 12) {
                     Button { save(export: false) } label: { Label("下書き", systemImage: "tray.and.arrow.down").frame(maxWidth: .infinity) }.buttonStyle(.bordered)
+                        .disabled(draftRecipe == recipe).accessibilityIdentifier("saveDraft")
                     Button { save(export: true) } label: { Label("写真に保存", systemImage: "square.and.arrow.down").frame(maxWidth: .infinity) }.buttonStyle(.borderedProminent)
+                        .disabled(exportedRecipe == recipe).accessibilityIdentifier("saveToPhotos")
                     Button { share() } label: { Image(systemName: "square.and.arrow.up").frame(height: 28) }.buttonStyle(.bordered).accessibilityLabel("共有")
                 }.padding(16)
             }
@@ -239,12 +248,16 @@ struct EditorView: View {
             defer { busy = false }
             do {
                 try await ProjectStore.shared.save(project, original: original)
-                savedRecipe = current; onSaved()
+                savedRecipe = current; draftRecipe = current; onSaved()
                 if export {
                     let image = await Task.detached(priority: .userInitiated) { ImageProcessor.shared.render(original, recipe: current) }.value
                     try await PhotoExporter.save(image)
+                    exportedRecipe = current
                 }
-                if close { dismiss() } else { message = export ? "コメント入りの写真を写真アプリに保存しました。マイフォトから再編集できます。" : "マイフォトに下書きを保存しました。" }
+                let done = export ? "コメント入りの写真を写真アプリに保存しました。マイフォトから再編集できます。" : "マイフォトに下書きを保存しました。"
+                if close { dismiss() }
+                else if let onReturnAfterSave { onReturnAfterSave(done); dismiss() }
+                else { message = done }
             } catch { message = error.localizedDescription }
         }
     }
