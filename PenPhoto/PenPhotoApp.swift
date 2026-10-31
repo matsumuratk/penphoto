@@ -34,6 +34,9 @@ struct HomeView: View {
     @State private var loading = false
     @State private var importError: String?
     @State private var showSettings = false
+    @AppStorage("returnToCameraAfterSave") private var returnToCameraAfterSave = false
+    @State private var savedNotice: String?
+    @State private var savedNoticeTask: Task<Void, Never>?
     var body: some View {
         GeometryReader { geometry in
         ZStack {
@@ -169,9 +172,18 @@ struct HomeView: View {
                 } catch { importError = error.localizedDescription }
             }
         }
-        .fullScreenCover(item: $editing) { photo in EditorView(editing: photo, onSaved: {}) }
+        .fullScreenCover(item: $editing) { photo in
+            EditorView(editing: photo, onReturnAfterSave: returnToCameraAfterSave ? { showSavedNotice($0) } : nil, onSaved: {})
+        }
         .sheet(isPresented: $library) { LibraryView() }
         .sheet(isPresented: $showSettings) { SettingsView() }
+        .overlay(alignment: .bottom) {
+            if let savedNotice {
+                Label(savedNotice, systemImage: "checkmark.circle.fill").font(.footnote).multilineTextAlignment(.leading)
+                    .padding(.horizontal, 16).padding(.vertical, 12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                    .padding(.horizontal, 24).padding(.bottom, 120).transition(.opacity).accessibilityIdentifier("savedNotice")
+            }
+        }
         .overlay { if loading { ProgressView("写真を読み込み中…").padding(24).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16)) } }
         .alert("読み込みできませんでした", isPresented: Binding(get: { importError != nil }, set: { if !$0 { importError = nil } })) { Button("OK") { importError = nil } } message: { Text(importError ?? "") }
     }
@@ -313,6 +325,14 @@ struct HomeView: View {
             guard !Task.isCancelled else { return }; camera.capture(flash: flash)
         }
     }
+    private func showSavedNotice(_ text: String) {
+        savedNoticeTask?.cancel()
+        withAnimation { savedNotice = text }
+        savedNoticeTask = Task {
+            do { try await Task.sleep(for: .seconds(3)) } catch { return }
+            withAnimation { savedNotice = nil }
+        }
+    }
     private func cancelCountdown() { countdownTask?.cancel(); countdownTask = nil; countdown = nil }
     private func openSample() {
         editing = EditingPhoto(project: PhotoProject(recipe: PhotoRecipe(captions: [Caption(text: "寄り道した、午後のカフェ。") ], captureAspect: captureAspect)), image: SamplePhoto.make())
@@ -347,7 +367,7 @@ struct LibraryView: View {
             }.background(Palette.paper).navigationTitle("マイフォト")
                 .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("閉じる") { dismiss() } } }
                 .task(id: revision) { do { projects = try await ProjectStore.shared.list() } catch { message = error.localizedDescription } }
-                .fullScreenCover(item: $editing) { photo in EditorView(editing: photo) { revision += 1 } }
+                .fullScreenCover(item: $editing) { photo in EditorView(editing: photo, alreadySaved: true) { revision += 1 } }
                 .alert("写真を読み込めませんでした", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) { Button("OK") { message = nil } } message: { Text(message ?? "") }
         }.tint(Palette.accent)
     }
@@ -365,9 +385,13 @@ struct ProjectThumbnail: View {
 }
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("returnToCameraAfterSave") private var returnToCameraAfterSave = false
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    Toggle("保存したらカメラに戻る", isOn: $returnToCameraAfterSave).accessibilityIdentifier("returnToCameraAfterSave")
+                } header: { Text("保存") } footer: { Text("撮影・読み込みした写真を「下書き」または「写真に保存」で保存したら、編集画面を閉じてカメラに戻ります。マイフォトから開いた写真には適用されません。") }
                 Section("PenPhotoについて") { Text("写真に、手書き風のひとことを残すカメラ。\n最初の開発版です。"); Text("写真と編集内容はこのiPhone内に保存されます。外部サーバーへの送信は行いません。"); Text("アプリを削除するとマイフォトも削除されます。残したい写真は「写真に保存」してください。") }
                 Section("ビューティー") { Text("顔を検出し、目・眉・口・鼻や輪郭付近を保ちながら、肌をなめらかに整えます。3種類の仕上がりと強さを選べます。顔が見つからないときは加工しません。髪や背景と肌の境界は完全には分離できないため、仕上がりは撮影条件によって異なります。") }
                 Section("フォント") { Text("Yomogi — SIL Open Font License 1.1"); NavigationLink("フォントライセンス") { ScrollView { Text((try? String(contentsOf: Bundle.main.url(forResource: "OFL-Yomogi", withExtension: "txt")!, encoding: .utf8)) ?? "").font(.caption).padding() }.navigationTitle("ライセンス") } }
